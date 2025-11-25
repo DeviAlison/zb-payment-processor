@@ -1,0 +1,109 @@
+services:
+  api01: &api
+    build: .
+    image: payment-processor-zt:latest
+    hostname: api01
+    environment:
+      - DB_HOST=db
+      - HTTP_PORT=3000
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.4'
+          memory: '100MB'
+
+  api02:
+    <<: *api
+    hostname: api02
+    deploy:
+      resources:
+        limits:
+          cpus: '0.4'
+          memory: '100MB'
+
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api01
+      - api02
+    ports:
+      - "9999:9999"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: '30MB'
+
+  db:
+    image: postgres:latest
+    hostname: db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=123
+      - POSTGRES_USER=admin
+      - POSTGRES_DB=zb-bank
+    volumes:
+      - ./postgres/script.sql:/docker-entrypoint-initdb.d/script.sql
+    command: >
+      postgres
+      -c max_connections=40
+      -c shared_buffers=48MB
+      -c effective_cache_size=96MB
+      -c maintenance_work_mem=10MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=4MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2MB
+      -c huge_pages=off
+      -c synchronous_commit=off
+      -c fsync=off
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d zb-bank"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.6'
+          memory: '220MB'
+  payment-processor-default:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./mocks/mock-gateway.js:/app/mock-gateway.js
+    command: node mock-gateway.js
+    expose:
+      - "8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: '40MB'
+
+  payment-processor-fallback:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./mocks/mock-gateway.js:/app/mock-gateway.js
+    command: node mock-gateway.js
+    expose:
+      - "8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: '40MB'
+
+networks:
+  default:
+    name: zb-bank-network
+    driver: bridge
